@@ -97,15 +97,15 @@ router.post("/login", async (req, res) => {
 // --- ✏️ 5. Update a client's own profile ---
 router.put("/:id", async (req, res) => {
   const { id } = req.params;
-  const { business_name, about_text, phone, email, address, logo_url, background_image_url } = req.body;
+  const { business_name, about_text, phone, email, address, logo_url, hero_url } = req.body;
 
   try {
     const result = await pool.query(
       `UPDATE clients
-       SET business_name = $1, about_text = $2, phone = $3, email = $4, address = $5, logo_url = $6, background_image_url = $7
+       SET business_name = $1, about_text = $2, phone = $3, email = $4, address = $5, logo_url = $6, hero_url = $7
        WHERE id = $8
        RETURNING *`,
-      [business_name, about_text, phone, email, address, logo_url, background_image_url, id]
+      [business_name, about_text, phone, email, address, logo_url, hero_url, id]
     );
 
     if (result.rows.length === 0) {
