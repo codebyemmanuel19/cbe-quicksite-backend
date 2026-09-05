@@ -94,4 +94,30 @@ router.post("/login", async (req, res) => {
   }
 });
 
+// --- ✏️ 5. Update a client's own profile ---
+router.put("/:id", async (req, res) => {
+  const { id } = req.params;
+  const { business_name, about_text, phone, email, address, logo_url, background_image_url } = req.body;
+
+  try {
+    const result = await pool.query(
+      `UPDATE clients
+       SET business_name = $1, about_text = $2, phone = $3, email = $4, address = $5, logo_url = $6, background_image_url = $7
+       WHERE id = $8
+       RETURNING *`,
+      [business_name, about_text, phone, email, address, logo_url, background_image_url, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Client not found" });
+    }
+
+    const { password: _, ...safeClient } = result.rows[0];
+    res.json({ success: true, client: safeClient });
+  } catch (err) {
+    console.error("Error updating client:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
