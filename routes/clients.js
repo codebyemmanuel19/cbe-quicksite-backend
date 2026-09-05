@@ -22,7 +22,18 @@ router.post("/", async (req, res) => {
   }
 });
 
-// --- 🔍 2. Get a client profile by their unique URL subdomain slug ---
+// --- 📋 2. Get all clients ---
+router.get("/", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM clients ORDER BY id DESC");
+    res.json({ success: true, clients: result.rows });
+  } catch (err) {
+    console.error("Error fetching clients:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- 🔍 3. Get a client profile by their unique URL subdomain slug ---
 router.get("/:slug", async (req, res) => {
   const { slug } = req.params;
 
@@ -52,7 +63,7 @@ router.get("/:slug", async (req, res) => {
   }
 });
 
-// --- 🔐 3. Client login — verify email + password ---
+// --- 🔐 4. Client login — verify email + password ---
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
