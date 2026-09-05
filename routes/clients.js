@@ -52,4 +52,35 @@ router.get("/:slug", async (req, res) => {
   }
 });
 
+// --- 🔐 3. Client login — verify email + password ---
+router.post("/login", async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    const result = await pool.query(
+      "SELECT * FROM clients WHERE email = $1",
+      [email]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ success: false, error: "Invalid email or password" });
+    }
+
+    const client = result.rows[0];
+
+    // 💡 PRODUCTION UPGRADE NOTE: switch to bcrypt.compare() once passwords are hashed
+    if (client.password !== password) {
+      return res.status(401).json({ success: false, error: "Invalid email or password" });
+    }
+
+    // Never send the password back to the frontend
+    const { password: _, ...safeClient } = client;
+
+    res.json({ success: true, client: safeClient });
+  } catch (err) {
+    console.error("Error during client login:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
