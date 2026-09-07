@@ -1,21 +1,27 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../db");
+const bcrypt = require("bcrypt");
+
+const SALT_ROUNDS = 10;
 
 // --- ➕ 1. Create a new client registration ---
 router.post("/", async (req, res) => {
   const { business_name, slug, email, password } = req.body;
 
   try {
-    // 💡 PRODUCTION UPGRADE NOTE: Before moving out of MVP testing, 
-    // we will hash this password string with bcrypt so it's safely encrypted!
+    // Hash the password before saving it — never store plain text
+    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+
     const result = await pool.query(
       `INSERT INTO clients (business_name, slug, email, password)
        VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [business_name, slug, email, password]
+      [business_name, slug, email, hashedPassword]
     );
-    res.json({ success: true, client: result.rows[0] });
+
+    const { password: _, ...safeClient } = result.rows[0];
+    res.json({ success: true, client: safeClient });
   } catch (err) {
     console.error("Error creating new client record:", err.message);
     res.status(500).json({ success: false, error: err.message });
@@ -26,7 +32,9 @@ router.post("/", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM clients ORDER BY id DESC");
-    res.json({ success: true, clients: result.rows });
+    // Strip passwords from every client in the list
+    const safeClients = result.rows.map(({ password, ...rest }) => rest);
+    res.json({ success: true, clients: safeClients });
   } catch (err) {
     console.error("Error fetching clients:", err.message);
     res.status(500).json({ success: false, error: err.message });
@@ -47,13 +55,14 @@ router.get("/:slug", async (req, res) => {
       return res.status(404).json({ success: false, error: "Client profile not found" });
     }
 
-    // Capture the record cleanly from the database rows array
     const rawClientData = result.rows[0];
 
-    // Crucial Business Logic: Ensures the frontend app receives an active subscription token state
+    // Strip the password before ever sending this response
+    const { password: _, ...safeClientData } = rawClientData;
+
     const standardizedClient = {
-      ...rawClientData,
-      status: rawClientData.status || "ACTIVE" 
+      ...safeClientData,
+      status: rawClientData.status || "ACTIVE"
     };
 
     res.json({ success: true, client: standardizedClient });
@@ -79,12 +88,13 @@ router.post("/login", async (req, res) => {
 
     const client = result.rows[0];
 
-    // 💡 PRODUCTION UPGRADE NOTE: switch to bcrypt.compare() once passwords are hashed
-    if (client.password !== password) {
+    // Compare the typed password against the stored hash
+    const passwordMatches = await bcrypt.compare(password, client.password);
+
+    if (!passwordMatches) {
       return res.status(401).json({ success: false, error: "Invalid email or password" });
     }
 
-    // Never send the password back to the frontend
     const { password: _, ...safeClient } = client;
 
     res.json({ success: true, client: safeClient });
