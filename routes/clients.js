@@ -109,6 +109,7 @@ router.put("/:id", async (req, res) => {
   const { id } = req.params;
   const {
     business_name,
+    home_text,
     about_text,
     phone,
     email,
@@ -124,13 +125,14 @@ router.put("/:id", async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE clients
-       SET business_name = $1, about_text = $2, phone = $3, email = $4, address = $5,
-           logo_url = $6, hero_url = $7, social_facebook = $8, social_instagram = $9,
-           social_whatsapp = $10, social_tiktok = $11
-       WHERE id = $12
+       SET business_name = $1, home_text = $2, about_text = $3, phone = $4, email = $5, address = $6,
+           logo_url = $7, hero_url = $8, social_facebook = $9, social_instagram = $10,
+           social_whatsapp = $11, social_tiktok = $12
+       WHERE id = $13
        RETURNING *`,
       [
         business_name,
+        home_text,
         about_text,
         phone,
         email,
