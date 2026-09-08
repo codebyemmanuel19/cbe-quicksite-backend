@@ -15,6 +15,17 @@ app.get("/", (req, res) => {
   res.send("CBE QuickSite backend is running beautifully!");
 });
 
+// Keep-alive target for the cron ping — also confirms the database is reachable
+app.get("/health", async (req, res) => {
+  try {
+    await pool.query("SELECT 1");
+    res.json({ status: "ok", database: "connected" });
+  } catch (err) {
+    console.error("Health check failed:", err.message);
+    res.status(500).json({ status: "error", database: "unreachable" });
+  }
+});
+
 // Database check route — visit http://localhost:5000/test-db on your laptop screen to verify postgres
 app.get("/test-db", async (req, res) => {
   try {
