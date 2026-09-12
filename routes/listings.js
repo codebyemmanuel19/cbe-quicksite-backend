@@ -25,19 +25,35 @@ function cleanStock(stock) {
   return Math.floor(value);
 }
 
+// Extra fields per template — property specs today, other niches later.
+// Empty values are dropped so the site never renders a blank spec.
+function cleanDetails(details) {
+  if (!details || typeof details !== "object" || Array.isArray(details)) return null;
+
+  const cleaned = {};
+  Object.entries(details).forEach(([key, value]) => {
+    if (value === null || value === undefined) return;
+    const text = String(value).trim();
+    if (text !== "") cleaned[key] = text;
+  });
+
+  return Object.keys(cleaned).length > 0 ? cleaned : null;
+}
+
 // --- ➕ 1. Create a new listing / product for a client ---
 router.post("/", async (req, res) => {
-  const { client_id, title, description, media_url, media_urls, price, stock } = req.body;
+  const { client_id, title, description, media_url, media_urls, price, stock, details } = req.body;
 
   const finalMediaUrls = cleanMediaUrls(media_urls, media_url);
   const finalStock = cleanStock(stock);
+  const finalDetails = cleanDetails(details);
 
   try {
     const result = await pool.query(
-      `INSERT INTO listings (client_id, title, description, media_urls, price, stock)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO listings (client_id, title, description, media_urls, price, stock, details)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [client_id, title, description, finalMediaUrls, price, finalStock]
+      [client_id, title, description, finalMediaUrls, price, finalStock, finalDetails]
     );
     res.json({ success: true, listing: result.rows[0] });
   } catch (err) {
@@ -61,6 +77,7 @@ router.get("/client/:client_id", async (req, res) => {
       ...row,
       // Map old database entry fields to new array keys if necessary
       media_urls: row.media_urls || [row.media_url].filter(Boolean),
+      details: row.details || {},
     }));
 
     res.json({ success: true, listings: formattedListings });
@@ -84,7 +101,11 @@ router.get("/:id", async (req, res) => {
     const row = result.rows[0];
     res.json({
       success: true,
-      listing: { ...row, media_urls: row.media_urls || [row.media_url].filter(Boolean) },
+      listing: {
+        ...row,
+        media_urls: row.media_urls || [row.media_url].filter(Boolean),
+        details: row.details || {},
+      },
     });
   } catch (err) {
     console.error("Error fetching listing:", err.message);
@@ -95,18 +116,19 @@ router.get("/:id", async (req, res) => {
 // --- ✏️ 4. Update an existing listing ---
 router.put("/:id", async (req, res) => {
   const { id } = req.params;
-  const { title, description, media_url, media_urls, price, stock } = req.body;
+  const { title, description, media_url, media_urls, price, stock, details } = req.body;
 
   const finalMediaUrls = cleanMediaUrls(media_urls, media_url);
   const finalStock = cleanStock(stock);
+  const finalDetails = cleanDetails(details);
 
   try {
     const result = await pool.query(
       `UPDATE listings
-       SET title = $1, description = $2, media_urls = $3, price = $4, stock = $5
-       WHERE id = $6
+       SET title = $1, description = $2, media_urls = $3, price = $4, stock = $5, details = $6
+       WHERE id = $7
        RETURNING *`,
-      [title, description, finalMediaUrls, price, finalStock, id]
+      [title, description, finalMediaUrls, price, finalStock, finalDetails, id]
     );
 
     if (result.rows.length === 0) {
