@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../db");
+const { requireAuth } = require("../middleware/auth");
 
 const MAX_IMAGES = 4;
 
@@ -40,9 +41,38 @@ function cleanDetails(details) {
   return Object.keys(cleaned).length > 0 ? cleaned : null;
 }
 
-// --- ➕ 1. Create a new listing / product for a client ---
-router.post("/", async (req, res) => {
-  const { client_id, title, description, media_url, media_urls, price, stock, details } = req.body;
+// Looks up who owns a listing and refuses anyone else.
+// This is the check that stops 45 → 46 reaching another client's product.
+async function loadOwnedListing(req, res) {
+  const { id } = req.params;
+
+  const found = await pool.query("SELECT client_id FROM listings WHERE id = $1", [id]);
+
+  if (found.rows.length === 0) {
+    res.status(404).json({ success: false, error: "Listing not found" });
+    return null;
+  }
+
+  const ownerId = found.rows[0].client_id;
+
+  if (req.user.is_admin !== true && String(ownerId) !== String(req.user.id)) {
+    res.status(403).json({ success: false, error: "Not allowed" });
+    return null;
+  }
+
+  return ownerId;
+}
+
+// --- ➕ 1. Create a listing — always filed under the logged-in client ---
+router.post("/", requireAuth, async (req, res) => {
+  const { title, description, media_url, media_urls, price, stock, details } = req.body;
+
+  // client_id comes from the token, never from the request body.
+  // Admin can still post on a client's behalf by sending client_id.
+  const clientId =
+    req.user.is_admin === true && req.body.client_id
+      ? req.body.client_id
+      : req.user.id;
 
   const finalMediaUrls = cleanMediaUrls(media_urls, media_url);
   const finalStock = cleanStock(stock);
@@ -53,7 +83,7 @@ router.post("/", async (req, res) => {
       `INSERT INTO listings (client_id, title, description, media_urls, price, stock, details)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [client_id, title, description, finalMediaUrls, price, finalStock, finalDetails]
+      [clientId, title, description, finalMediaUrls, price, finalStock, finalDetails]
     );
     res.json({ success: true, listing: result.rows[0] });
   } catch (err) {
@@ -62,7 +92,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// --- 🔍 2. Get all listings for a specific client ---
+// --- 🔍 2. Get all listings for a client — public, the live sites need it ---
 router.get("/client/:client_id", async (req, res) => {
   const { client_id } = req.params;
 
@@ -72,10 +102,8 @@ router.get("/client/:client_id", async (req, res) => {
       [client_id]
     );
 
-    // Standardize rows array data to match the frontend keys completely
     const formattedListings = result.rows.map((row) => ({
       ...row,
-      // Map old database entry fields to new array keys if necessary
       media_urls: row.media_urls || [row.media_url].filter(Boolean),
       details: row.details || {},
     }));
@@ -87,7 +115,7 @@ router.get("/client/:client_id", async (req, res) => {
   }
 });
 
-// --- 🔎 3. Get one listing by id ---
+// --- 🔎 3. Get one listing by id — public ---
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -113,8 +141,8 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// --- ✏️ 4. Update an existing listing ---
-router.put("/:id", async (req, res) => {
+// --- ✏️ 4. Update a listing — must be yours ---
+router.put("/:id", requireAuth, async (req, res) => {
   const { id } = req.params;
   const { title, description, media_url, media_urls, price, stock, details } = req.body;
 
@@ -123,6 +151,9 @@ router.put("/:id", async (req, res) => {
   const finalDetails = cleanDetails(details);
 
   try {
+    const owner = await loadOwnedListing(req, res);
+    if (owner === null) return;
+
     const result = await pool.query(
       `UPDATE listings
        SET title = $1, description = $2, media_urls = $3, price = $4, stock = $5, details = $6
@@ -131,10 +162,6 @@ router.put("/:id", async (req, res) => {
       [title, description, finalMediaUrls, price, finalStock, finalDetails, id]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, error: "Listing not found" });
-    }
-
     res.json({ success: true, listing: result.rows[0] });
   } catch (err) {
     console.error("Error updating listing:", err.message);
@@ -142,19 +169,15 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// --- 🗑️ 5. Delete a listing ---
-router.delete("/:id", async (req, res) => {
+// --- 🗑️ 5. Delete a listing — must be yours ---
+router.delete("/:id", requireAuth, async (req, res) => {
   const { id } = req.params;
 
   try {
-    const result = await pool.query(
-      "DELETE FROM listings WHERE id = $1 RETURNING *",
-      [id]
-    );
+    const owner = await loadOwnedListing(req, res);
+    if (owner === null) return;
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, error: "Listing not found" });
-    }
+    await pool.query("DELETE FROM listings WHERE id = $1", [id]);
 
     res.json({ success: true, message: "Listing deleted successfully" });
   } catch (err) {

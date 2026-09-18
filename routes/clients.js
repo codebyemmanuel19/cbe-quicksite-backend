@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../db");
 const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+const { requireAuth, requireAdmin, requireSelfOrAdmin } = require("../middleware/auth");
 
 const SALT_ROUNDS = 10;
 const TEMPLATES = ["shop", "realestate"];
@@ -21,8 +23,8 @@ function cleanTemplate(input) {
   return TEMPLATES.includes(value) ? value : "shop";
 }
 
-// --- ➕ 1. Create a new client registration ---
-router.post("/", async (req, res) => {
+// --- ➕ 1. Create a new client registration — admin only ---
+router.post("/", requireAuth, requireAdmin, async (req, res) => {
   const { business_name, email, password, template_type } = req.body;
 
   const slug = cleanSlug(req.body.slug);
@@ -49,8 +51,8 @@ router.post("/", async (req, res) => {
   }
 });
 
-// --- 📋 2. Get all clients ---
-router.get("/", async (req, res) => {
+// --- 📋 2. Get all clients — admin only, this list has every client's email ---
+router.get("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM clients ORDER BY id DESC");
     // Strip passwords from every client in the list
@@ -62,7 +64,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-// --- 🔐 3. Client login — verify email + password ---
+// --- 🔐 3. Client login — verify email + password, hand back a token ---
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
@@ -85,16 +87,27 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ success: false, error: "Invalid email or password" });
     }
 
+    // The token carries who they are. Every write checks it.
+    const token = jwt.sign(
+      {
+        id: client.id,
+        slug: client.slug,
+        is_admin: client.is_admin === true,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
     const { password: _, ...safeClient } = client;
 
-    res.json({ success: true, client: safeClient });
+    res.json({ success: true, token, client: safeClient });
   } catch (err) {
     console.error("Error during client login:", err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// --- 🔍 4. Get a client profile by their unique URL subdomain slug ---
+// --- 🔍 4. Get a client profile by slug — public, the live sites need it ---
 router.get("/:slug", async (req, res) => {
   const { slug } = req.params;
 
@@ -111,8 +124,8 @@ router.get("/:slug", async (req, res) => {
 
     const rawClientData = result.rows[0];
 
-    // Strip the password before ever sending this response
-    const { password: _, ...safeClientData } = rawClientData;
+    // Strip the password and the admin flag before ever sending this response
+    const { password: _, is_admin: __, ...safeClientData } = rawClientData;
 
     const standardizedClient = {
       ...safeClientData,
@@ -128,9 +141,9 @@ router.get("/:slug", async (req, res) => {
 });
 
 // --- ✏️ 5. Update a client's own profile ---
-// template_type is deliberately not here — a client can't switch their own
-// site type, and leaving it out means a dashboard save can never wipe it.
-router.put("/:id", async (req, res) => {
+// requireSelfOrAdmin: the id in the URL must match the id in the token.
+// Changing 9 to 12 in the request now gets refused.
+router.put("/:id", requireAuth, requireSelfOrAdmin, async (req, res) => {
   const { id } = req.params;
   const {
     business_name,
@@ -184,8 +197,8 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// --- 🔀 6. Switch a client's template (you, not the client) ---
-router.put("/:id/template", async (req, res) => {
+// --- 🔀 6. Switch a client's template — admin only ---
+router.put("/:id/template", requireAuth, requireAdmin, async (req, res) => {
   const { id } = req.params;
   const template = cleanTemplate(req.body.template_type);
 
